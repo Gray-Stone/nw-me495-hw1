@@ -15,11 +15,12 @@ setup(
     zip_safe=True,
     maintainer='leo',
     maintainer_email='leograyc@duck.com',
-    description='TODO: Package description',
+    description='Control the turtle and navigate through waypoints.',
     license='LGPL-3.0-only',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'waypoint = turtle_control.waypoint:main'
         ],
     },
 )
