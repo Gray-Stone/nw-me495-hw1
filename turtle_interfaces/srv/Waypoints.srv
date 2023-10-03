@@ -1,0 +1,3 @@
+geometry_msgs/Pose2D[] waypoints # A list of poses for waypoint, theta is ignored.
+---
+float64 distance
