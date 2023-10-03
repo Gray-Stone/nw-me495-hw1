@@ -1,3 +1,5 @@
+#! /usr/bin/env python3
+
 '''
 Control the turtle to move through a bunch of waypoints. 
 
@@ -8,9 +10,14 @@ from typing import List, Optional
 import rclpy
 from rclpy.node import Node as RosNode
 import std_srvs.srv
+
+from turtle_interface.srv import Waypoints as WaypointsSrv
+from geometry_msgs.msg import Pose2D as Pose2DMsg
+
 import enum
 
 from rcl_interfaces.msg import ParameterDescriptor as RosParameterDescriptor
+import queue
 
 
 def main(args=None):
@@ -44,6 +51,7 @@ class WaypointNode(RosNode):
 
         # Interal variables
         self.state = self.State.STOPPED
+        self.loaded_waypoints: Optional[List[Pose2DMsg]] = None
 
         # ROS stuff
         self.declare_parameter(
@@ -56,12 +64,38 @@ class WaypointNode(RosNode):
 
         self.timer = self.create_timer(1.0 / self.timer_frequency,
                                        self.timer_callback)
+
+        # Hosted Services
         self.toggle_srv = self.create_service(std_srvs.srv.Empty, "toggle",
                                               self.toggle_srv_callback)
+        self.load_srv = self.create_service(WaypointsSrv, "load",
+                                            self.load_srv_callback)
 
     def timer_callback(self) -> None:
         if self.state == self.State.MOVING:
             self.get_logger().debug("Issuing Command")
+
+    def load_srv_callback(
+            self, request: WaypointsSrv.Request,
+            response: WaypointsSrv.Response) -> WaypointsSrv.Response:
+        """Callback to handle "Load" service.
+
+        Argument:
+            Request: geo 
+            Response:
+        Returns:
+            WaypointsSrv.Response: the waypoints service response, combined circular length of waypoint route
+        """
+
+        # Push the way point request onto queues.
+        # print(f"load srv called: {request.waypoints}")
+        self.loaded_waypoints = request.waypoints
+        print(self.loaded_waypoints)
+        # TODO (LEO) Have the turtle draw the way points.
+
+        # TODO (LEO) Fill in later
+        response.distance = 0.0
+        return response
 
     def toggle_srv_callback(
             self, _: std_srvs.srv.Empty.Request,
