@@ -11,12 +11,14 @@ from typing import List
 
 import rclpy
 import std_srvs.srv
+from error_metric_helper import ErrorMeasurer
 from geometry_msgs.msg import Pose2D as Pose2DMsg
 from geometry_msgs.msg import Twist as TwistMsg
 from rcl_interfaces.msg import ParameterDescriptor as RosParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.node import Node as RosNode
 from turtle_interface.srv import Waypoints as WaypointsSrv
+from turtle_interface.msg import ErrorMetric as ErrorMetricMsg
 from turtlesim.msg import Pose as TurtlePose
 from turtlesim.srv import SetPen, TeleportAbsolute, TeleportRelative
 
@@ -75,6 +77,8 @@ class WaypointNode(RosNode):
         # This is for timer to remember it's targe. Should be reset on load.
         self._current_waypoint_index: int = 0
 
+        self._error_measure = ErrorMeasurer(0.0)
+
         # ROS stuff
         self.declare_parameter(
             "frequency", self.DEFAULT_TIMER_FREQUENCY,
@@ -120,7 +124,7 @@ class WaypointNode(RosNode):
                                               callback_group=self._drawing_callback_group)
         self._pen_client.wait_for_service()
 
-        # Subscribers
+        # Subscriber and publisher
         self._pos_subs = self.create_subscription(TurtlePose,
                                                   '/turtle1/pose',
                                                   self.turtle_pose_recv_callback,
@@ -128,6 +132,8 @@ class WaypointNode(RosNode):
                                                   callback_group=self._pose_ctl_callback_group)
 
         self._cmd_publisher = self.create_publisher(TwistMsg, '/turtle1/cmd_vel', 10)
+
+        self._error_metric_publisher = self.create_publisher(ErrorMetricMsg, 'loop_metrics', 10)
 
     def timer_callback(self) -> None:
         if self._state == self.State.MOVING:
@@ -149,9 +155,18 @@ class WaypointNode(RosNode):
             heading_error = map_into_180(target_heading - self._turtle_pose.theta)
             # Advance the waypoint when we are close enough to current one
             if pos_error < self._on_waypoint_distance_tolerance:
+                self.get_logger().info(f"Reached waypoint at {current_waypoint.x , current_waypoint.y}")
                 self._current_waypoint_index = self._current_waypoint_index + 1
                 if self._current_waypoint_index >= len(self._loaded_waypoints):
                     self._current_waypoint_index = 0
+                elif self._current_waypoint_index == 1:
+                    print("About to log another lap")
+                    self._error_measure.finished_another_loop()
+                    self.get_logger().info(
+                        f"Finished another loop, looped {self._error_measure.completed_loops} times")
+                    self.get_logger().info(f"Error Metrics: {self._error_measure}")
+
+                    self._error_metric_publisher.publish(self._error_measure.generate_error_metric_message())
 
             cmd = self.calculate_command(heading_error, pos_error)
 
@@ -184,6 +199,13 @@ class WaypointNode(RosNode):
         '''
         Store the received turtle position message.
         '''
+        # Measure how much turtle has moved forward
+        dx = msg.x - self._turtle_pose.x
+        dy = msg.y - self._turtle_pose.y
+        distance = math.sqrt(dx**2 + dy**2)
+
+        self._error_measure.add_traveled_distance(distance)
+
         self._turtle_pose = msg
 
     async def load_srv_callback(self, request: WaypointsSrv.Request,
@@ -207,31 +229,31 @@ class WaypointNode(RosNode):
 
         # Reset everything.
         await self._reset_client.call_async(std_srvs.srv.Empty_Request())
+        self._loaded_waypoints = []
 
-        # Draw all the way points
-        for waypoint in request.waypoints:
-            await self.turtle_draw_waypoint(waypoint)
-
-        # Accumulate distance. This is a bit tricker because we need a loop of distance
-        response.distance = 0.0
-        # We have no distance to calculate if it's less then 2 points
+        # We don't do anything with less then 2 waypoints
         if len(request.waypoints) > 1:
+            # Draw all the way points
+            for waypoint in request.waypoints:
+                await self.turtle_draw_waypoint(waypoint)
+
+            # Accumulate distance. This is a bit tricker because we need a loop of distance
+            response.distance = 0.0
             for i in range(len(request.waypoints)):
                 dx = request.waypoints[i].x - request.waypoints[i - 1].x
                 dy = request.waypoints[i].y - request.waypoints[i - 1].y
                 response.distance += math.sqrt(dx**2 + dy**2)
 
-        # Place turtle at first waypoint
-        # It is possible we got empty waypoint, skip.
-        if request.waypoints:
+            # Place turtle at first waypoint
             # Push the way point request onto queues.
             self._loaded_waypoints = request.waypoints
-            self._current_waypoint_index = 0
+            self._current_waypoint_index = 1
             start_point = request.waypoints[0]
             await self._teleport_abs_client.call_async(
                 TeleportAbsolute.Request(x=start_point.x, y=start_point.y, theta=start_point.theta))
             self.get_logger().info("Turtle is ready at the start of waypoint")
 
+        self._error_measure = ErrorMeasurer(response.distance)
         return response
 
     def toggle_srv_callback(self, _: std_srvs.srv.Empty.Request,
