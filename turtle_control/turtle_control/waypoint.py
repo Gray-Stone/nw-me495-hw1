@@ -51,7 +51,7 @@ class WaypointNode(RosNode):
     def __init__(self) -> None:
         super().__init__("waypoint")
 
-        # Interal variables
+        # Integral variables
         self.state = self.State.STOPPED
         self.loaded_waypoints: List[Pose2DMsg] = []
 
@@ -73,9 +73,9 @@ class WaypointNode(RosNode):
         self.load_srv = self.create_service(WaypointsSrv, "load",
                                             self.load_srv_callback)
 
-        # Client for movnig turtle
+        # Client for moving turtle
 
-        # Seperate callback group for client to call other nodes.
+        # Separate callback group for client to call other nodes.
         self.drawing_callback_group = MutuallyExclusiveCallbackGroup()
         self.pose_ctl_callback_group = MutuallyExclusiveCallbackGroup()
 
@@ -142,7 +142,7 @@ class WaypointNode(RosNode):
         """
 
         self.get_logger().info(
-            f"Load service is called with {len(request.waypoints)} waypoitns")
+            f"Load service is called with {len(request.waypoints)} waypoints")
 
         # Reset everything.
         await self.reset_client.call_async(std_srvs.srv.Empty_Request())
@@ -180,7 +180,7 @@ class WaypointNode(RosNode):
             response: std_srvs.srv.Empty.Response
     ) -> std_srvs.srv.Empty.Response:
         # TODO(LEO) remove later
-        print("toggel service called")
+        print("toggle service called")
 
         if self.state == self.State.MOVING:
             self.state = self.State.STOPPED
@@ -192,9 +192,9 @@ class WaypointNode(RosNode):
 
     async def turtle_draw_waypoint(self, waypoint: Pose2DMsg):
         '''
-        Use ros messages to control turtlism to draw X for a specific waypoint
+        Use ros messages to control turtle to draw X for a specific waypoint
         '''
-        # iterate through waypoitns and draw them
+        # iterate through waypoints and draw them
         await self.turn_pen_on(False)
 
         for i in range(2):
