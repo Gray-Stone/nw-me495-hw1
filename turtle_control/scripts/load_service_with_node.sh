@@ -11,14 +11,14 @@ readonly here="${here}"
 # So the service call that's happening after node being created, will happen first.
 ( 
 sleep 1 ;
-timeout -s TERM 1m ros2 service call /load turtle_interface/srv/Waypoints '{waypoints: [{x: 1.0 , y: 2.0 , theta: 0.0} , {x: 3.0 , y: 2.5 , theta: 0.8}]}'
+timeout -s TERM 1m ros2 service call /load turtle_interface/srv/Waypoints '{waypoints: [{x: 1.0 , y: 1.0 , theta: 0.0} , {x: 1.0 , y: 2.0 , theta: 0.8} , {x: 1.0 , y: 3.0 , theta: 0.8}]}'
 ) &
 SRV_CALL_PID=$!
 
-(
-ros2 run turtlesim  turtlesim_node
-) &
-TURTLE_PID=$!
+# (
+# ros2 run turtlesim  turtlesim_node
+# ) &
+# TURTLE_PID=$!
 
 trap -l
 
