@@ -14,7 +14,7 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from turtle_interface.srv import Waypoints as WaypointsSrv
 from geometry_msgs.msg import Pose2D as Pose2DMsg
 from turtlesim.srv import TeleportAbsolute, TeleportRelative, SetPen
-
+from turtlesim.msg import Pose as TurtlePose
 import enum
 
 import math
@@ -77,6 +77,7 @@ class WaypointNode(RosNode):
 
         # Seperate callback group for client to call other nodes.
         self.drawing_callback_group = MutuallyExclusiveCallbackGroup()
+        self.pose_ctl_callback_group = MutuallyExclusiveCallbackGroup()
 
         # TODO (LEO) The turtle name might need fixing
         self.reset_client = self.create_client(
@@ -103,9 +104,30 @@ class WaypointNode(RosNode):
             callback_group=self.drawing_callback_group)
         self.pen_client.wait_for_service()
 
+        # Subscribers
+        self.pos_subs = self.create_subscription(
+            TurtlePose,
+            '/turtle1/pose',
+            self.turtle_pose_recv_callback,
+            10,
+            callback_group=self.pose_ctl_callback_group)
+
     def timer_callback(self) -> None:
         if self.state == self.State.MOVING:
             self.get_logger().debug("Issuing Command")
+
+        if not self.loaded_waypoints:
+            self.get_logger().error(
+                "No waypoints loaded. Load them with the 'load' service.")
+        else:
+            pass
+            #
+
+    def turtle_pose_recv_callback(self, msg: TurtlePose) -> None:
+        '''
+        Store the received turtle position message.
+        '''
+        self.turtle_pose = msg
 
     async def load_srv_callback(
             self, request: WaypointsSrv.Request,
