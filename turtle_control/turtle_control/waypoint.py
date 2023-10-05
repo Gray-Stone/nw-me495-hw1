@@ -5,24 +5,20 @@ Control the turtle to move through a bunch of waypoints.
 TODO(LEO) Finish later
 '''
 
-from typing import List, Optional
-import rclpy
-from rclpy.node import Node as RosNode
-import std_srvs.srv
+import enum
+import math
+from typing import List
 
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
-from turtle_interface.srv import Waypoints as WaypointsSrv
+import rclpy
+import std_srvs.srv
 from geometry_msgs.msg import Pose2D as Pose2DMsg
 from geometry_msgs.msg import Twist as TwistMsg
-from geometry_msgs.msg import Vector3 as Vector3Msg
-
-from turtlesim.srv import TeleportAbsolute, TeleportRelative, SetPen
-from turtlesim.msg import Pose as TurtlePose
-import enum
-
-import math
-
 from rcl_interfaces.msg import ParameterDescriptor as RosParameterDescriptor
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.node import Node as RosNode
+from turtle_interface.srv import Waypoints as WaypointsSrv
+from turtlesim.msg import Pose as TurtlePose
+from turtlesim.srv import SetPen, TeleportAbsolute, TeleportRelative
 
 
 def main(args=None):
@@ -72,12 +68,12 @@ class WaypointNode(RosNode):
         super().__init__("waypoint")
 
         # Integral variables
-        self.state = self.State.STOPPED
-        self.loaded_waypoints: List[Pose2DMsg] = []
+        self._state = self.State.STOPPED
+        self._loaded_waypoints: List[Pose2DMsg] = []
         # Start off with empty turtle pose
-        self.turtle_pose: TurtlePose = TurtlePose()
+        self._turtle_pose: TurtlePose = TurtlePose()
         # This is for timer to remember it's targe. Should be reset on load.
-        self.current_waypoint_index: int = 0
+        self._current_waypoint_index: int = 0
 
         # ROS stuff
         self.declare_parameter(
@@ -87,85 +83,85 @@ class WaypointNode(RosNode):
             "tolerance", self.DEFAULT_ON_WAYPOINT_DISTANCE_TOLERANCE,
             RosParameterDescriptor(description="The tolerance (distance) to consider turtle on the waypoint"))
 
-        self.timer_frequency = self.get_parameter("frequency").get_parameter_value().double_value
-        self.on_waypoint_distance_tolerance = self.get_parameter(
+        self._timer_frequency = self.get_parameter("frequency").get_parameter_value().double_value
+        self._on_waypoint_distance_tolerance = self.get_parameter(
             "tolerance").get_parameter_value().double_value
 
-        self.timer = self.create_timer(1.0 / self.timer_frequency, self.timer_callback)
+        self._turtle_control_timer = self.create_timer(1.0 / self._timer_frequency, self.timer_callback)
 
         # Hosted Services
-        self.toggle_srv = self.create_service(std_srvs.srv.Empty, "toggle", self.toggle_srv_callback)
-        self.load_srv = self.create_service(WaypointsSrv, "load", self.load_srv_callback)
+        self._toggle_srv = self.create_service(std_srvs.srv.Empty, "toggle", self.toggle_srv_callback)
+        self._load_srv = self.create_service(WaypointsSrv, "load", self.load_srv_callback)
 
         # Client for moving turtle
 
         # Separate callback group for client to call other nodes.
-        self.drawing_callback_group = MutuallyExclusiveCallbackGroup()
-        self.pose_ctl_callback_group = MutuallyExclusiveCallbackGroup()
+        self._drawing_callback_group = MutuallyExclusiveCallbackGroup()
+        self._pose_ctl_callback_group = MutuallyExclusiveCallbackGroup()
 
         # TODO (LEO) The turtle name might need fixing
-        self.reset_client = self.create_client(std_srvs.srv.Empty,
-                                               '/reset',
-                                               callback_group=self.drawing_callback_group)
-        self.reset_client.wait_for_service()
+        self._reset_client = self.create_client(std_srvs.srv.Empty,
+                                                '/reset',
+                                                callback_group=self._drawing_callback_group)
+        self._reset_client.wait_for_service()
 
-        self.teleport_abs_client = self.create_client(TeleportAbsolute,
-                                                      "/turtle1/teleport_absolute",
-                                                      callback_group=self.drawing_callback_group)
-        self.teleport_abs_client.wait_for_service()
+        self._teleport_abs_client = self.create_client(TeleportAbsolute,
+                                                       "/turtle1/teleport_absolute",
+                                                       callback_group=self._drawing_callback_group)
+        self._teleport_abs_client.wait_for_service()
 
-        self.teleport_rel_client = self.create_client(TeleportRelative,
-                                                      "/turtle1/teleport_relative",
-                                                      callback_group=self.drawing_callback_group)
-        self.teleport_rel_client.wait_for_service()
+        self._teleport_rel_client = self.create_client(TeleportRelative,
+                                                       "/turtle1/teleport_relative",
+                                                       callback_group=self._drawing_callback_group)
+        self._teleport_rel_client.wait_for_service()
 
-        self.pen_client = self.create_client(SetPen,
-                                             "/turtle1/set_pen",
-                                             callback_group=self.drawing_callback_group)
-        self.pen_client.wait_for_service()
+        self._pen_client = self.create_client(SetPen,
+                                              "/turtle1/set_pen",
+                                              callback_group=self._drawing_callback_group)
+        self._pen_client.wait_for_service()
 
         # Subscribers
-        self.pos_subs = self.create_subscription(TurtlePose,
-                                                 '/turtle1/pose',
-                                                 self.turtle_pose_recv_callback,
-                                                 10,
-                                                 callback_group=self.pose_ctl_callback_group)
+        self._pos_subs = self.create_subscription(TurtlePose,
+                                                  '/turtle1/pose',
+                                                  self.turtle_pose_recv_callback,
+                                                  10,
+                                                  callback_group=self._pose_ctl_callback_group)
 
-        self.cmd_publisher = self.create_publisher(TwistMsg, '/turtle1/cmd_vel', 10)
+        self._cmd_publisher = self.create_publisher(TwistMsg, '/turtle1/cmd_vel', 10)
 
     def timer_callback(self) -> None:
-        if self.state == self.State.MOVING:
+        if self._state == self.State.MOVING:
             self.get_logger().debug("Issuing Command")
 
         # TODO(LEO) Put into moving
-        if not self.loaded_waypoints:
+        if not self._loaded_waypoints:
             self.get_logger().error("No waypoints loaded. Load them with the 'load' service.")
         else:
             # Calculate target velocity to move towards target
-            current_waypoint = self.loaded_waypoints[self.current_waypoint_index]
+            current_waypoint = self._loaded_waypoints[self._current_waypoint_index]
 
             # Note the order of which subtract which really matter here. It could result in flipped sign
-            dx = current_waypoint.x - self.turtle_pose.x
-            dy = current_waypoint.y - self.turtle_pose.y
+            dx = current_waypoint.x - self._turtle_pose.x
+            dy = current_waypoint.y - self._turtle_pose.y
             pos_error = math.sqrt((dx)**2 + (dy)**2)
 
             target_heading = math.atan2(dy, dx)
-            heading_error = map_into_180(target_heading - self.turtle_pose.theta)
+            heading_error = map_into_180(target_heading - self._turtle_pose.theta)
             # Advance the waypoint when we are close enough to current one
-            if pos_error < self.on_waypoint_distance_tolerance:
-                self.current_waypoint_index = self.current_waypoint_index + 1
-                if self.current_waypoint_index >= len(self.loaded_waypoints):
-                    self.current_waypoint_index = 0
+            if pos_error < self._on_waypoint_distance_tolerance:
+                self._current_waypoint_index = self._current_waypoint_index + 1
+                if self._current_waypoint_index >= len(self._loaded_waypoints):
+                    self._current_waypoint_index = 0
 
             cmd = self.calculate_command(heading_error, pos_error)
 
             self.get_logger().debug(f"""
-            Heading to target index {self.current_waypoint_index}
-            Heading: target {target_heading}; turtle {self.turtle_pose.theta}; error {heading_error}; angle-z-speed {cmd.angular.z}
+            Heading to target index {self._current_waypoint_index}
+            Heading: target {target_heading}; turtle {self._turtle_pose.theta}; error {heading_error}; angle-z-speed {cmd.angular.z}
             Pos error : {pos_error}; linear-x-speed {cmd.linear.x} 
                                     """)
 
-            self.cmd_publisher.publish(cmd)
+            self._cmd_publisher.publish(cmd)
 
     def calculate_command(self, heading_error: float, pos_error: float) -> TwistMsg:
 
@@ -188,7 +184,7 @@ class WaypointNode(RosNode):
         '''
         Store the received turtle position message.
         '''
-        self.turtle_pose = msg
+        self._turtle_pose = msg
 
     async def load_srv_callback(self, request: WaypointsSrv.Request,
                                 response: WaypointsSrv.Response) -> WaypointsSrv.Response:
@@ -205,12 +201,12 @@ class WaypointNode(RosNode):
         self.get_logger().info(f"Load service is called with {len(request.waypoints)} waypoints")
 
         # Make sure the motion control is stopped.
-        if self.state == self.State.MOVING:
+        if self._state == self.State.MOVING:
             self.get_logger().warning(
                 "Received /Load during motion. Stopping robot to reset and load new waypoints")
 
         # Reset everything.
-        await self.reset_client.call_async(std_srvs.srv.Empty_Request())
+        await self._reset_client.call_async(std_srvs.srv.Empty_Request())
 
         # Draw all the way points
         for waypoint in request.waypoints:
@@ -229,10 +225,10 @@ class WaypointNode(RosNode):
         # It is possible we got empty waypoint, skip.
         if request.waypoints:
             # Push the way point request onto queues.
-            self.loaded_waypoints = request.waypoints
-            self.current_waypoint_index = 0
+            self._loaded_waypoints = request.waypoints
+            self._current_waypoint_index = 0
             start_point = request.waypoints[0]
-            await self.teleport_abs_client.call_async(
+            await self._teleport_abs_client.call_async(
                 TeleportAbsolute.Request(x=start_point.x, y=start_point.y, theta=start_point.theta))
             self.get_logger().info("Turtle is ready at the start of waypoint")
 
@@ -243,11 +239,11 @@ class WaypointNode(RosNode):
         # TODO(LEO) remove later
         print("toggle service called")
 
-        if self.state == self.State.MOVING:
-            self.state = self.State.STOPPED
+        if self._state == self.State.MOVING:
+            self._state = self.State.STOPPED
             self.get_logger().info("Stopping")
         else:
-            self.state = self.State.MOVING
+            self._state = self.State.MOVING
             self.get_logger().debug("Switching into moving state ")
         return response
 
@@ -262,12 +258,12 @@ class WaypointNode(RosNode):
             # Centered at waypoint
             ang = math.pi / 4 + i * math.pi / 2
 
-            await self.teleport_abs_client.call_async(
+            await self._teleport_abs_client.call_async(
                 TeleportAbsolute.Request(x=waypoint.x, y=waypoint.y, theta=waypoint.theta))
             # Draw one line of the X
             await self.turn_pen_on(True)
-            await self.teleport_rel_client.call_async(TeleportRelative.Request(linear=0.5, angular=ang))
-            await self.teleport_rel_client.call_async(
+            await self._teleport_rel_client.call_async(TeleportRelative.Request(linear=0.5, angular=ang))
+            await self._teleport_rel_client.call_async(
                 TeleportRelative.Request(linear=0.5 * 2, angular=math.pi))
             await self.turn_pen_on(False)
 
@@ -279,7 +275,7 @@ class WaypointNode(RosNode):
         '''
 
         pen_req = SetPen.Request(r=70, g=70, b=30, width=2, off=not on)
-        ret = await self.pen_client.call_async(pen_req)
+        ret = await self._pen_client.call_async(pen_req)
         if ret is None:
             raise RuntimeError(f"Failed to get pen service return. Got {ret}")
 
