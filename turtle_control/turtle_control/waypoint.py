@@ -238,7 +238,6 @@ class Waypoint(RosNode):
                             self._loaded_waypoints):
                         self._current_waypoint_index = 0
                     elif self._current_waypoint_index == 1:
-                        print("About to log another lap")
                         self._error_measure.finished_another_loop()
                         self.get_logger().info(
                             f"Finished another loop, looped {self._error_measure.completed_loops} times"
@@ -380,7 +379,6 @@ class Waypoint(RosNode):
         Returns:
             std_srvs.srv.Empty.Response: ack for something is done
         """
-        self.get_logger().error("Entered logger")
         if self._state == self.State.MOVING:
             self.set_stopped()
             self.get_logger().info("Stopping")
