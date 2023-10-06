@@ -1,5 +1,8 @@
 #! /usr/bin/zsh
 
+# A quick shell script on early stage of development to test waypoint node with some service calls.
+# Intended for manual debuging only
+
 # set -euvx
 
 this="$(realpath "$0")"
@@ -18,8 +21,8 @@ readonly here="${here}"
 
     timeout -s TERM 1m ros2 service call /load turtle_interface/srv/Waypoints \
         '{waypoints: [{x: 2.0 , y: 1.0 , theta: 0.0}
- , {x: 3.0 , y: 9.0 , theta: 0.8}
- , {x: 10.0 , y: 6.0 , theta: 2.8}]}'
+        , {x: 3.0 , y: 9.0 , theta: 0.8}
+        , {x: 10.0 , y: 6.0 , theta: 2.8}]}'
 
     sleep 0.5
     timeout -s TERM 1m ros2 service call /toggle std_srvs/srv/Empty
@@ -63,6 +66,5 @@ cleanup() {
 trap cleanup EXIT SIGINT
 # trap cleanup SIGINT
 
-"${here}/../turtle_control/waypoint.py"
-# "${here}/../turtle_control/waypoint.py" --ros-args --log-level debug
+ros2 run turtle_control waypoint.py
 exit 0

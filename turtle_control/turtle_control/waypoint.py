@@ -1,4 +1,3 @@
-#! /usr/bin/env python3
 '''
 Control the turtle to move through a bunch of waypoints. 
 
