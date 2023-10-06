@@ -1,0 +1,16 @@
+<launch>
+    <node pkg="turtlesim" exec="turtlesim_node" name="controlled_turtle">
+        <param from="$(find-pkg-share turtle_control)/colors.yaml" />
+    </node>
+
+    <node pkg="turtle_control" exec="waypoint" name="waypoint">
+        <param name="tolerance" value="0.05" />
+        <param name="frequency" value="100.0" />
+        <remap from="cmd_vel" to="turtle1/cmd_vel" />
+        <remap from="teleport_absolute" to="turtle1/teleport_absolute" />
+        <remap from="teleport_relative" to="turtle1/teleport_relative" />
+        <remap from="set_pen" to="turtle1/set_pen" />
+        <remap from="pose" to="turtle1/pose" />
+        <remap from="cmd_vel" to="turtle1/cmd_vel" />
+    </node>
+</launch>

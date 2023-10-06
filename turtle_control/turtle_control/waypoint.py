@@ -11,7 +11,7 @@ from typing import List, Optional
 
 import rclpy
 import std_srvs.srv
-from error_metric_helper import ErrorMeasurer
+from turtle_control.error_metric_helper import ErrorMeasurer
 from geometry_msgs.msg import Pose2D as Pose2DMsg
 from geometry_msgs.msg import Twist as TwistMsg
 from rcl_interfaces.msg import ParameterDescriptor as RosParameterDescriptor
@@ -131,28 +131,28 @@ class WaypointNode(RosNode):
         self._reset_client.wait_for_service()
 
         self._teleport_abs_client = self.create_client(TeleportAbsolute,
-                                                       "/turtle1/teleport_absolute",
+                                                       "teleport_absolute",
                                                        callback_group=self._drawing_callback_group)
         self._teleport_abs_client.wait_for_service()
 
         self._teleport_rel_client = self.create_client(TeleportRelative,
-                                                       "/turtle1/teleport_relative",
+                                                       "teleport_relative",
                                                        callback_group=self._drawing_callback_group)
         self._teleport_rel_client.wait_for_service()
 
         self._pen_client = self.create_client(SetPen,
-                                              "/turtle1/set_pen",
+                                              "set_pen",
                                               callback_group=self._drawing_callback_group)
         self._pen_client.wait_for_service()
 
         # Subscriber and publisher
         self._pos_subs = self.create_subscription(TurtlePose,
-                                                  '/turtle1/pose',
+                                                  'pose',
                                                   self.turtle_pose_recv_callback,
                                                   10,
                                                   callback_group=self._pose_ctl_callback_group)
 
-        self._cmd_publisher = self.create_publisher(TwistMsg, '/turtle1/cmd_vel', 10)
+        self._cmd_publisher = self.create_publisher(TwistMsg, 'cmd_vel', 10)
 
         self._error_metric_publisher = self.create_publisher(ErrorMetricMsg, 'loop_metrics', 10)
 
