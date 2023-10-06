@@ -30,6 +30,7 @@ readonly here="${here}"
         '{waypoints: [{x: 2.0 , y: 1.0 , theta: 0.0}
  , {x: 3.0 , y: 9.0 , theta: 0.8}
  , {x: 10.0 , y: 6.0 , theta: 2.8}]}'
+    timeout -s TERM 1m ros2 service call /toggle std_srvs/srv/Empty
 
     while true; do
         sleep 1

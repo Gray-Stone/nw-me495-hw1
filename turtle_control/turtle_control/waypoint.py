@@ -257,20 +257,24 @@ class WaypointNode(RosNode):
                 TeleportAbsolute.Request(x=start_point.x, y=start_point.y, theta=start_point.theta))
             self.get_logger().info("Turtle is ready at the start of waypoint")
 
+        # No worry about pen issue here. Robot is stopped by this srv. And only resume-able by another toggle
         self._error_measure = ErrorMeasurer(response.distance)
         return response
 
-    def toggle_srv_callback(self, _: std_srvs.srv.Empty.Request,
+    async def toggle_srv_callback(self, _: std_srvs.srv.Empty.Request,
                             response: std_srvs.srv.Empty.Response) -> std_srvs.srv.Empty.Response:
-        # TODO(LEO) remove later
-        print("toggle service called")
-
+        '''
+        Toggle the moving or stopping state of the robot. 
+        '''
         if self._state == self.State.MOVING:
             self.set_stopped()
             self.get_logger().info("Stopping")
-        else:
+        elif self._state == self.State.STOPPED:
+            await self.turn_pen_on(True , True)
             self._state = self.State.MOVING
             self.get_logger().debug("Switching into moving state ")
+        else:
+            raise ValueError(f"State enum of {self._state} Is not handled ! ")
         return response
 
     async def turtle_draw_waypoint(self, waypoint: Pose2DMsg):
@@ -293,7 +297,7 @@ class WaypointNode(RosNode):
                 TeleportRelative.Request(linear=0.5 * 2, angular=math.pi))
             await self.turn_pen_on(False)
 
-    async def turn_pen_on(self, on: bool = True) -> None:
+    async def turn_pen_on(self, on: bool = True , moving_color:bool = False) -> None:
         '''
         Use set-pen service to turn pen on or off.
         Args:
@@ -301,6 +305,10 @@ class WaypointNode(RosNode):
         '''
 
         pen_req = SetPen.Request(r=70, g=70, b=30, width=2, off=not on)
+        if moving_color:
+            pen_req.r = 200
+            pen_req.g = 180
+            pen_req.b = 150
         ret = await self._pen_client.call_async(pen_req)
         if ret is None:
             raise RuntimeError(f"Failed to get pen service return. Got {ret}")
