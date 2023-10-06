@@ -7,7 +7,7 @@ TODO(LEO) Finish later
 
 import enum
 import math
-from typing import List
+from typing import List, Optional
 
 import rclpy
 import std_srvs.srv
@@ -55,7 +55,7 @@ class WaypointNode(RosNode):
 
     # Start linear motion when speed is at this threshold.
     # 90 deg is 1.5 ish rad
-    PURE_ROTATION_THRESHOLD = 3
+    PURE_ROTATION_THRESHOLD = 1.4
 
     DEFAULT_TIMER_FREQUENCY: float = 100.0  # 100hz
     DEFAULT_ON_WAYPOINT_DISTANCE_TOLERANCE: float = 0.1
@@ -65,6 +65,25 @@ class WaypointNode(RosNode):
         '''
         STOPPED = 0
         MOVING = 1
+
+    class RainbowFart():
+        '''
+        generate RBG output that's rotating through the rainbow color spam
+        Internally, it just loop through the HUE in hsv
+        '''
+
+        def __init__(self, hsv_advance_rate=0.01) -> None:
+            self.hsv_advance_rate = hsv_advance_rate
+            self.current_h = 0.0
+
+        def get_next_rgb(self) -> tuple[float, float, float]:
+            '''
+            Get the next rbg color in rainbow (number scaled between 0.0 to 1.0)
+            '''
+            self.current_h += self.hsv_advance_rate
+            if self.current_h >= 1.0:
+                self.current_h = 0.0
+            return hsv_to_rgb((self.current_h, 1, 1))
 
     def __init__(self) -> None:
         super().__init__("waypoint")
@@ -77,8 +96,10 @@ class WaypointNode(RosNode):
         # This is for timer to remember it's targe. Should be reset on load.
         self._current_waypoint_index: int = 0
 
-        self._error_measure = ErrorMeasurer(0.0)
+        self._rainbow_fart = self.RainbowFart(0.008)
 
+        self._error_measure = ErrorMeasurer(0.0)
+        self.color_h = 0
         # ROS stuff
         self.declare_parameter(
             "frequency", self.DEFAULT_TIMER_FREQUENCY,
@@ -135,13 +156,16 @@ class WaypointNode(RosNode):
 
         self._error_metric_publisher = self.create_publisher(ErrorMetricMsg, 'loop_metrics', 10)
 
-    def timer_callback(self) -> None:
+    async def timer_callback(self) -> None:
         if self._state == self.State.MOVING:
             self.get_logger().debug("Issuing Command")
 
             if not self._loaded_waypoints:
                 self.get_logger().error("No waypoints loaded. Load them with the 'load' service.")
             else:
+                # Rotate pen color here
+                await self.turn_pen_on(True, self._rainbow_fart.get_next_rgb())
+
                 # Calculate target velocity to move towards target
                 current_waypoint = self._loaded_waypoints[self._current_waypoint_index]
 
@@ -262,7 +286,7 @@ class WaypointNode(RosNode):
         return response
 
     async def toggle_srv_callback(self, _: std_srvs.srv.Empty.Request,
-                            response: std_srvs.srv.Empty.Response) -> std_srvs.srv.Empty.Response:
+                                  response: std_srvs.srv.Empty.Response) -> std_srvs.srv.Empty.Response:
         '''
         Toggle the moving or stopping state of the robot. 
         '''
@@ -270,7 +294,7 @@ class WaypointNode(RosNode):
             self.set_stopped()
             self.get_logger().info("Stopping")
         elif self._state == self.State.STOPPED:
-            await self.turn_pen_on(True , True)
+            await self.turn_pen_on(True, (0.5, 1, 1))
             self._state = self.State.MOVING
             self.get_logger().debug("Switching into moving state ")
         else:
@@ -297,7 +321,7 @@ class WaypointNode(RosNode):
                 TeleportRelative.Request(linear=0.5 * 2, angular=math.pi))
             await self.turn_pen_on(False)
 
-    async def turn_pen_on(self, on: bool = True , moving_color:bool = False) -> None:
+    async def turn_pen_on(self, on: bool = True, rgb: Optional[tuple[float]] = None) -> None:
         '''
         Use set-pen service to turn pen on or off.
         Args:
@@ -305,10 +329,9 @@ class WaypointNode(RosNode):
         '''
 
         pen_req = SetPen.Request(r=70, g=70, b=30, width=2, off=not on)
-        if moving_color:
-            pen_req.r = 200
-            pen_req.g = 180
-            pen_req.b = 150
+        if rgb:
+            pen_req.r, pen_req.g, pen_req.b = [int(n * 255) for n in rgb]
+
         ret = await self._pen_client.call_async(pen_req)
         if ret is None:
             raise RuntimeError(f"Failed to get pen service return. Got {ret}")
@@ -340,6 +363,49 @@ def map_into_180(rad: float) -> float:
 
     reduced = rad - int(ratio) * (math.pi * 2)
     return reduced
+
+
+def hsv_to_rgb(hsv: tuple[float, float, float]) -> tuple:
+    '''
+    External_Sourced[1]
+
+    Converter I got from web. This code suppose to be what's inside GIMP and converted to python. 
+    It has worked very well for me.
+
+    args:
+        tuple of (H,S,V) in 0.0 to 1.0 scale. 
+    
+    return tuple of(R,G,B) in 0.0 to 1.0 scale
+    
+    note: 
+        [int(n*255) for n in numbers ] to scale them back to uint8
+    
+    '''
+    h, s, v = hsv
+    if s:
+        if h == 1.0:
+            h = 0.0
+        i = int(h * 6.0)
+        f = h * 6.0 - i
+
+        w = v * (1.0 - s)
+        q = v * (1.0 - s * f)
+        t = v * (1.0 - s * (1.0 - f))
+
+        if i == 0:
+            return (v, t, w)
+        if i == 1:
+            return (q, v, w)
+        if i == 2:
+            return (w, v, t)
+        if i == 3:
+            return (w, q, v)
+        if i == 4:
+            return (t, w, v)
+        if i == 5:
+            return (v, w, q)
+    else:
+        return (v, v, v)
 
 
 if __name__ == '__main__':
