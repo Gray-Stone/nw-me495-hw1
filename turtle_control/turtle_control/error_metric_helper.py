@@ -23,6 +23,7 @@ class ErrorMeasurer():
     # This is updated per loop
     completed_loops: int = 0
 
+    # Internal lock shared by all member functions. Must be a RLock since they reference each other.
     _data_lock = threading.RLock()
 
     def get_current_loop_distance(self) -> float:
@@ -68,4 +69,10 @@ class ErrorMeasurer():
         return out
 
     def __str__(self) -> str:
+        """String-ify the class for printing in debug statement.
+        Will print more then just the slots. some derived values are included for better debugging. 
+
+        Returns:
+            str: class info in string
+        """
         return f"Traveled: {self.overall_distance}; loops {self.completed_loops}; estimated_overall: {self.completed_loops * self.straight_line_loop_length}; Error: {self.get_accumulated_error()}"
