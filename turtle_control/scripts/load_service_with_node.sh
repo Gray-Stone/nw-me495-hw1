@@ -49,8 +49,6 @@ SRV_CALL_PID=$!
 # ) &
 # TURTLE_PID=$!
 
-trap -l
-
 cleanup() {
     echo "Clean up: killing other bg processes"
 
