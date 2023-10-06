@@ -43,21 +43,22 @@ class WaypointNode(RosNode):
     # MAX MIN of angular and linear speeds.
     # We only command positive linear speed.
     LINEAR_VEL_MIN = 0.5
-    LINEAR_VEL_MAX = 5.0
+    LINEAR_VEL_MAX = 4.0
 
     # Angular vel only have max, because it could be positive or negative
     ANGULAR_VEL_MAX = 3.0
 
     # error * Gain = speed
-    ANGULAR_VEL_GAIN = 4.0
+    ANGULAR_VEL_GAIN = 5.0
     LINEAR_VEL_GAIN = 5.0
 
     # Start linear motion when speed is at this threshold.
     # 90 deg is 1.5 ish rad
-    PURE_ROTATION_THRESHOLD = 1.4
+    PURE_ROTATION_THRESHOLD = 1.5
 
     DEFAULT_TIMER_FREQUENCY: float = 100.0  # 100hz
     DEFAULT_ON_WAYPOINT_DISTANCE_TOLERANCE: float = 0.1
+    PEN_COLOR_TIMER_FREQUENCY:float = 10
 
     class State(enum.Enum):
         '''Internal state of the waypoint node
@@ -95,7 +96,7 @@ class WaypointNode(RosNode):
         # This is for timer to remember it's targe. Should be reset on load.
         self._current_waypoint_index: int = 0
 
-        self._rainbow_fart = self.RainbowFart(0.008)
+        self._rainbow_fart = self.RainbowFart(0.05)
 
         self._error_measure = ErrorMeasurer(0.0)
         self.color_h = 0
@@ -111,7 +112,12 @@ class WaypointNode(RosNode):
         self._on_waypoint_distance_tolerance = self.get_parameter(
             "tolerance").get_parameter_value().double_value
 
+        # Timers
         self._turtle_control_timer = self.create_timer(1.0 / self._timer_frequency, self.timer_callback)
+        self._rainbow_fart_callback_group = MutuallyExclusiveCallbackGroup()
+        # This is split into a second callback group because the turtlesim respond on pen setting 
+        # is slow. We don't want to hold up the control loop timer.
+        self._pen_rainbow_timer = self.create_timer(1.0 / self.PEN_COLOR_TIMER_FREQUENCY, self.pen_rainbow_callback , callback_group=self._rainbow_fart_callback_group)
 
         # Hosted Services
         self._toggle_srv = self.create_service(std_srvs.srv.Empty, "toggle", self.toggle_srv_callback)
@@ -160,11 +166,8 @@ class WaypointNode(RosNode):
             self.get_logger().debug("Issuing Command")
 
             if not self._loaded_waypoints:
-                self.get_logger().error("No waypoints loaded. Load them with the 'load' service.")
+                self.get_logger().error("Developer error! In Moving state without any waypoint!")
             else:
-                # Rotate pen color here
-                await self.turn_pen_on(True, self._rainbow_fart.get_next_rgb())
-
                 # Calculate target velocity to move towards target
                 current_waypoint = self._loaded_waypoints[self._current_waypoint_index]
 
@@ -289,13 +292,17 @@ class WaypointNode(RosNode):
         '''
         Toggle the moving or stopping state of the robot. 
         '''
+        self.get_logger().error("Entered logger")
         if self._state == self.State.MOVING:
             self.set_stopped()
             self.get_logger().info("Stopping")
         elif self._state == self.State.STOPPED:
-            await self.turn_pen_on(True, (0.5, 1, 1))
-            self._state = self.State.MOVING
-            self.get_logger().debug("Switching into moving state ")
+            if not self._loaded_waypoints:
+                self.get_logger().error("No waypoints loaded. Load them with the 'load' service.")
+            else:
+                await self.turn_pen_on(True, (0.5, 1, 1))
+                self._state = self.State.MOVING
+                self.get_logger().debug("Switching into moving state ")
         else:
             raise ValueError(f"State enum of {self._state} Is not handled ! ")
         return response
@@ -344,6 +351,13 @@ class WaypointNode(RosNode):
         # Depend on default twist msg being all zeros
         self._cmd_publisher.publish(TwistMsg())
 
+    async def pen_rainbow_callback(self):
+
+        if self._state == self.State.MOVING:
+            # Rotate pen color here
+            await self.turn_pen_on(True, self._rainbow_fart.get_next_rgb())
+
+        # Don't do anything if not in Moving state
 
 def map_into_180(rad: float) -> float:
     '''
