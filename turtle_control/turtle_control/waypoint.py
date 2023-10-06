@@ -139,44 +139,48 @@ class WaypointNode(RosNode):
         if self._state == self.State.MOVING:
             self.get_logger().debug("Issuing Command")
 
-        # TODO(LEO) Put into moving
-        if not self._loaded_waypoints:
-            self.get_logger().error("No waypoints loaded. Load them with the 'load' service.")
+            if not self._loaded_waypoints:
+                self.get_logger().error("No waypoints loaded. Load them with the 'load' service.")
+            else:
+                # Calculate target velocity to move towards target
+                current_waypoint = self._loaded_waypoints[self._current_waypoint_index]
+
+                # Note the order of which subtract which really matter here. It could result in flipped sign
+                dx = current_waypoint.x - self._turtle_pose.x
+                dy = current_waypoint.y - self._turtle_pose.y
+                pos_error = math.sqrt((dx)**2 + (dy)**2)
+
+                target_heading = math.atan2(dy, dx)
+                heading_error = map_into_180(target_heading - self._turtle_pose.theta)
+                # Advance the waypoint when we are close enough to current one
+                if pos_error < self._on_waypoint_distance_tolerance:
+                    self.get_logger().info(f"Reached waypoint at {current_waypoint.x , current_waypoint.y}")
+                    self._current_waypoint_index = self._current_waypoint_index + 1
+                    if self._current_waypoint_index >= len(self._loaded_waypoints):
+                        self._current_waypoint_index = 0
+                    elif self._current_waypoint_index == 1:
+                        print("About to log another lap")
+                        self._error_measure.finished_another_loop()
+                        self.get_logger().info(
+                            f"Finished another loop, looped {self._error_measure.completed_loops} times")
+                        self.get_logger().info(f"Error Metrics: {self._error_measure}")
+
+                        self._error_metric_publisher.publish(
+                            self._error_measure.generate_error_metric_message())
+
+                cmd = self.calculate_command(heading_error, pos_error)
+
+                self.get_logger().debug(f"""
+                Heading to target index {self._current_waypoint_index}
+                Heading: target {target_heading}; turtle {self._turtle_pose.theta}; error {heading_error}; angle-z-speed {cmd.angular.z}
+                Pos error : {pos_error}; linear-x-speed {cmd.linear.x} 
+                                        """)
+                self._cmd_publisher.publish(cmd)
+        elif self._state == self.State.STOPPED:
+            pass
         else:
-            # Calculate target velocity to move towards target
-            current_waypoint = self._loaded_waypoints[self._current_waypoint_index]
-
-            # Note the order of which subtract which really matter here. It could result in flipped sign
-            dx = current_waypoint.x - self._turtle_pose.x
-            dy = current_waypoint.y - self._turtle_pose.y
-            pos_error = math.sqrt((dx)**2 + (dy)**2)
-
-            target_heading = math.atan2(dy, dx)
-            heading_error = map_into_180(target_heading - self._turtle_pose.theta)
-            # Advance the waypoint when we are close enough to current one
-            if pos_error < self._on_waypoint_distance_tolerance:
-                self.get_logger().info(f"Reached waypoint at {current_waypoint.x , current_waypoint.y}")
-                self._current_waypoint_index = self._current_waypoint_index + 1
-                if self._current_waypoint_index >= len(self._loaded_waypoints):
-                    self._current_waypoint_index = 0
-                elif self._current_waypoint_index == 1:
-                    print("About to log another lap")
-                    self._error_measure.finished_another_loop()
-                    self.get_logger().info(
-                        f"Finished another loop, looped {self._error_measure.completed_loops} times")
-                    self.get_logger().info(f"Error Metrics: {self._error_measure}")
-
-                    self._error_metric_publisher.publish(self._error_measure.generate_error_metric_message())
-
-            cmd = self.calculate_command(heading_error, pos_error)
-
-            self.get_logger().debug(f"""
-            Heading to target index {self._current_waypoint_index}
-            Heading: target {target_heading}; turtle {self._turtle_pose.theta}; error {heading_error}; angle-z-speed {cmd.angular.z}
-            Pos error : {pos_error}; linear-x-speed {cmd.linear.x} 
-                                    """)
-
-            self._cmd_publisher.publish(cmd)
+            # There should not be accidental fall through
+            raise ValueError(f"State enum of {self._state} Is not handled ! ")
 
     def calculate_command(self, heading_error: float, pos_error: float) -> TwistMsg:
 
@@ -226,7 +230,7 @@ class WaypointNode(RosNode):
         if self._state == self.State.MOVING:
             self.get_logger().warning(
                 "Received /Load during motion. Stopping robot to reset and load new waypoints")
-
+            self.set_stopped()
         # Reset everything.
         await self._reset_client.call_async(std_srvs.srv.Empty_Request())
         self._loaded_waypoints = []
@@ -262,7 +266,7 @@ class WaypointNode(RosNode):
         print("toggle service called")
 
         if self._state == self.State.MOVING:
-            self._state = self.State.STOPPED
+            self.set_stopped()
             self.get_logger().info("Stopping")
         else:
             self._state = self.State.MOVING
@@ -300,6 +304,15 @@ class WaypointNode(RosNode):
         ret = await self._pen_client.call_async(pen_req)
         if ret is None:
             raise RuntimeError(f"Failed to get pen service return. Got {ret}")
+
+    def set_stopped(self) -> None:
+        '''
+        Change to stopped state as well as stop robot moving.
+        '''
+        self._state = self.State.STOPPED
+
+        # Depend on default twist msg being all zeros
+        self._cmd_publisher.publish(TwistMsg())
 
 
 def map_into_180(rad: float) -> float:
